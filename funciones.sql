@@ -8,21 +8,21 @@ Se deben crear las claves y constraints apropiados.
 */
 
 CREATE TABLE STATE (
-    NAME VARCHAR(50) NOT NULL,
-    ABBR VARCHAR(2) NOT NULL,
-    PRIMARY KEY (ABBR),
-    UNIQUE (NAME)
+    STATE VARCHAR(50) NOT NULL,
+    STATE_ABBREVIATION VARCHAR(2) NOT NULL,
+    PRIMARY KEY (STATE_ABBREVIATION),
+    UNIQUE (STATE)
 );
 
 CREATE TABLE YEAR_DATA (
-    YEAR_NUMBER INT NOT NULL,
-    LEAP_YEAR BOOLEAN NOT NULL,
-    PRIMARY KEY (YEAR_NUMBER)
+    YEAR INT NOT NULL,
+    LEAP BOOLEAN NOT NULL,
+    PRIMARY KEY (YEAR)
 );
 
 CREATE TABLE EDUCATION_LEVEL (
     EDUCATION_LEVEL_CODE INT NOT NULL,
-    EDUCATION_LEVEL VARCHAR(255) NOT NULL,
+    MOTHER_EDUCATION_LEVEL VARCHAR(255) NOT NULL,
     PRIMARY KEY (EDUCATION_LEVEL_CODE)
 );
 
@@ -54,17 +54,17 @@ representadas en las tablas ESTADO, ANIO y NIVEL_EDUCACION.
 */
 
 CREATE TABLE US_BIRTHS (
-    STATE VARCHAR(2) NOT NULL,
-    YEAR_NUMBER INT NOT NULL,
-    EDUCATION_LEVEL INT NOT NULL,
+    STATE_ABBREVIATION VARCHAR(2) NOT NULL,
+    YEAR INT NOT NULL,
+    EDUCATION_LEVEL_CODE INT NOT NULL,
     GENDER VARCHAR(1) NOT NULL,
     BIRTHS INT NOT NULL,
-    MOTHER_AVG_AGE DECIMAL(3,1) NOT NULL,
-    AVG_BIRTH_WEIGHT DECIMAL(5,1) NOT NULL,
-    FOREIGN KEY (STATE) REFERENCES STATE(ABBR),
-    FOREIGN KEY (YEAR_NUMBER) REFERENCES YEAR_DATA(YEAR_NUMBER),
-    FOREIGN KEY (EDUCATION_LEVEL) REFERENCES EDUCATION_LEVEL(EDUCATION_LEVEL_CODE),
-    PRIMARY KEY (STATE,YEAR_NUMBER,EDUCATION_LEVEL,GENDER)
+    MOTHER_AVERAGE_AGE DECIMAL(3,1) NOT NULL,
+    AVERAGE_BIRTH_WEIGHT DECIMAL(5,1) NOT NULL,
+    FOREIGN KEY (STATE_ABBREVIATION) REFERENCES STATE(STATE_ABBREVIATION),
+    FOREIGN KEY (YEAR) REFERENCES YEAR_DATA(YEAR),
+    FOREIGN KEY (EDUCATION_LEVEL_CODE) REFERENCES EDUCATION_LEVEL(EDUCATION_LEVEL_CODE),
+    PRIMARY KEY (STATE_ABBREVIATION,YEAR,EDUCATION_LEVEL_CODE,GENDER)
 );
 
 
@@ -94,20 +94,20 @@ con la siguiente información:
 */
 
 CREATE VIEW US_BIRTHS_VIEW AS 
-        SELECT STATE.NAME AS STATE, 
-                STATE.ABBR AS STATE_ABBREVIATION, 
-                YEAR_DATA.YEAR_NUMBER AS YEAR, 
+        SELECT STATE.STATE AS STATE, 
+                STATE.STATE_ABBREVIATION AS STATE_ABBREVIATION, 
+                YEAR_DATA.YEAR AS YEAR, 
                 GENDER, 
-                EDUCATION_LEVEL.EDUCATION_LEVEL AS MOTHER_EDUCATION_LEVEL,
+                EDUCATION_LEVEL.MOTHER_EDUCATION_LEVEL AS MOTHER_EDUCATION_LEVEL,
                 EDUCATION_LEVEL.EDUCATION_LEVEL_CODE AS EDUCATION_LEVEL_CODE,
                 BIRTHS, 
-                MOTHER_AVG_AGE AS MOTHER_AVERAGE_AGE, 
-                AVG_BIRTH_WEIGHT AS AVERAGE_BIRTH_WEIGHT
+                MOTHER_AVERAGE_AGE, 
+                AVERAGE_BIRTH_WEIGHT
                 
         FROM 
-                US_BIRTHS JOIN STATE ON US_BIRTHS.STATE = STATE.ABBR 
-                JOIN YEAR_DATA ON US_BIRTHS.YEAR_NUMBER = YEAR_DATA.YEAR_NUMBER 
-                JOIN EDUCATION_LEVEL ON US_BIRTHS.EDUCATION_LEVEL = EDUCATION_LEVEL.EDUCATION_LEVEL_CODE;
+                US_BIRTHS JOIN STATE ON US_BIRTHS.STATE_ABBREVIATION = STATE.STATE_ABBREVIATION
+                JOIN YEAR_DATA ON US_BIRTHS.YEAR = YEAR_DATA.YEAR
+                JOIN EDUCATION_LEVEL ON US_BIRTHS.EDUCATION_LEVEL_CODE = EDUCATION_LEVEL.EDUCATION_LEVEL_CODE;
 
 
 
@@ -125,49 +125,21 @@ CREATE OR REPLACE FUNCTION insert_us_births() RETURNS TRIGGER AS $$
         is_leap_year BOOLEAN;
         -- data_to_insert US_BIRTHS%ROWTYPE;
     BEGIN
-        RAISE NOTICE 'State: % Abbr: % Year: % Gender:  % MEL: % ELC: % Births: % MAA:  % ABW:  %',
-            NEW.State,
-            NEW.State_Abbreviation,
-            NEW.Year, 
-            NEW.GENDER,
-            NEW.Mother_Education_Level,
-            NEW.Education_Level_Code,
-            NEW.Births, 
-            NEW.Mother_Average_Age, 
-            NEW.Average_Birth_Weight;
-
-        SELECT ABBR INTO state_id FROM STATE WHERE ABBR = NEW.State_Abbreviation;
+        SELECT STATE_ABBREVIATION INTO state_id FROM STATE WHERE STATE_ABBREVIATION = NEW.State_Abbreviation;
         IF NOT FOUND THEN
-            INSERT INTO STATE (ABBR, NAME) VALUES (NEW.State_Abbreviation, NEW.State);
+            INSERT INTO STATE (STATE_ABBREVIATION, STATE) VALUES (NEW.State_Abbreviation, NEW.State);
         END IF;
 
-        SELECT YEAR_NUMBER INTO year_id FROM YEAR_DATA WHERE YEAR_NUMBER = NEW.Year;
+        SELECT YEAR INTO year_id FROM YEAR_DATA WHERE YEAR = NEW.Year;
         IF NOT FOUND THEN
             is_leap_year = is_leap_year(NEW.Year);
-            INSERT INTO YEAR_DATA (YEAR_NUMBER, LEAP_YEAR) VALUES (NEW.YEAR, is_leap_year);
+            INSERT INTO YEAR_DATA (YEAR, LEAP) VALUES (NEW.YEAR, is_leap_year);
         END IF;
 
         SELECT EDUCATION_LEVEL_CODE INTO education_level_id FROM EDUCATION_LEVEL WHERE EDUCATION_LEVEL_CODE = NEW.Education_Level_Code;
         IF NOT FOUND THEN
-            INSERT INTO EDUCATION_LEVEL (EDUCATION_LEVEL_CODE, EDUCATION_LEVEL) VALUES (NEW.Education_Level_Code, NEW.Mother_Education_Level);
+            INSERT INTO EDUCATION_LEVEL (EDUCATION_LEVEL_CODE, MOTHER_EDUCATION_LEVEL) VALUES (NEW.Education_Level_Code, NEW.Mother_Education_Level);
         END IF;
-
-        
-        -- data_to_insert.STATE = NEW.State_Abbreviation;
-        -- data_to_insert.YEAR_NUMBER = NEW.Year;
-        -- data_to_insert.EDUCATION_LEVEL = NEW.Education_Level_Code;
-        -- data_to_insert.gender = NEW.gender;
-        -- data_to_insert.births = NEW.births;
-        -- data_to_insert.mother_avg_age = NEW.mother_average_age;
-        -- data_to_insert.avg_birth_weight = NEW.average_birth_weight;
-        -- RAISE NOTICE 'State: % Year: % Gender: % ELC: % Births: % MAA:  % ABW:  %',
-        --     data_to_insert.STATE,
-        --     data_to_insert.YEAR_NUMBER,
-        --     data_to_insert.gender,
-        --     data_to_insert.EDUCATION_LEVEL,
-        --     data_to_insert.births,
-        --     data_to_insert.mother_avg_age,
-        --     data_to_insert.mother_avg_age;
                     
         INSERT INTO US_BIRTHS VALUES (NEW.State_Abbreviation, NEW.Year, NEW.Education_Level_Code, NEW.gender, NEW.births, NEW.mother_average_age, NEW.average_birth_weight );
         RETURN NULL;
@@ -219,12 +191,12 @@ DECLARE
     gender_code TEXT;
     education_level_code INTEGER;
     total_births BIGINT;
-    avg_age NUMERIC;
+    avg_age INTEGER;
     min_age INTEGER;
     max_age INTEGER;
-    avg_weight NUMERIC;
-    min_weight NUMERIC;
-    max_weight NUMERIC;
+    avg_weight DECIMAL(4,3);
+    min_weight DECIMAL(4,3);
+    max_weight DECIMAL(4,3);
 BEGIN
     -- Get the first year in the table
     SELECT MIN(YEAR_NUMBER) INTO first_year FROM YEAR_DATA;
@@ -246,12 +218,12 @@ BEGIN
         -- Get the total births, average age, minimum age, maximum age, average weight, minimum weight, and maximum weight for the year
         SELECT
             SUM(BIRTHS),
-            AVG(MOTHER_AVG_AGE),
-            MIN(MOTHER_AVG_AGE),
-            MAX(MOTHER_AVG_AGE),
-            AVG(AVG_BIRTH_WEIGHT),
-            MIN(AVG_BIRTH_WEIGHT),
-            MAX(AVG_BIRTH_WEIGHT)
+            CAST(AVG(MOTHER_AVG_AGE) AS INTEGER),
+            CAST(MIN(MOTHER_AVG_AGE) AS INTEGER),
+            CAST(MAX(MOTHER_AVG_AGE) AS INTEGER),
+            CAST(AVG(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3)),
+            CAST(MIN(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3)),
+            CAST(MAX(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3))
         INTO
             total_births,
             avg_age,
@@ -282,28 +254,27 @@ BEGIN
             -- Iterate over each state with more than 200,000 births
             FOR state_code IN (
                 SELECT
-                    STATE.ABBR
+                    STATE
                 FROM
-                    US_BIRTHS
-                    JOIN STATE ON US_BIRTHS.STATE = STATE.ABBR
+                    US_BIRTHS_VIEW
                 WHERE
-                    YEAR_NUMBER = current_year
+                    YEAR = current_year
                 GROUP BY
-                    STATE.ABBR
+                    STATE
                 HAVING
-                    SUM(TOTAL_BIRTHS) > 200000
+                    SUM(BIRTHS) > 200000
                 ORDER BY
-                    STATE.ABBR DESC
+                    STATE DESC
             ) LOOP
                 -- Get the metrics for the current state and year
                 SELECT
                         SUM(BIRTHS),
-                        AVG(MOTHER_AVG_AGE),
-                        MIN(MOTHER_AVG_AGE),
-                        MAX(MOTHER_AVG_AGE),
-                        AVG(AVG_BIRTH_WEIGHT),
-                        MIN(AVG_BIRTH_WEIGHT),
-                        MAX(AVG_BIRTH_WEIGHT)
+                        CAST(AVG(MOTHER_AVG_AGE) AS INTEGER),
+                        CAST(MIN(MOTHER_AVG_AGE) AS INTEGER),
+                        CAST(MAX(MOTHER_AVG_AGE) AS INTEGER),
+                        CAST(AVG(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3)),
+                        CAST(MIN(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3)),
+                        CAST(MAX(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3))
                 INTO
                     total_births,
                     avg_age,
@@ -341,12 +312,12 @@ BEGIN
             -- Get the metrics for the current gender and year
             SELECT
                 SUM(BIRTHS),
-                AVG(MOTHER_AVG_AGE),
-                MIN(MOTHER_AVG_AGE),
-                MAX(MOTHER_AVG_AGE),
-                AVG(AVG_BIRTH_WEIGHT),
-                MIN(AVG_BIRTH_WEIGHT),
-                MAX(AVG_BIRTH_WEIGHT)
+                CAST(AVG(MOTHER_AVG_AGE) AS INTEGER),
+                CAST(MIN(MOTHER_AVG_AGE) AS INTEGER),
+                CAST(MAX(MOTHER_AVG_AGE) AS INTEGER),
+                CAST(AVG(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3)),
+                CAST(MIN(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3)),
+                CAST(MAX(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3))
             INTO
                 total_births,
                 avg_age,
@@ -383,12 +354,12 @@ BEGIN
             -- Get the metrics for the current education level and year
             SELECT
                 SUM(BIRTHS),
-                AVG(MOTHER_AVG_AGE),
-                MIN(MOTHER_AVG_AGE),
-                MAX(MOTHER_AVG_AGE),
-                AVG(AVG_BIRTH_WEIGHT),
-                MIN(AVG_BIRTH_WEIGHT),
-                MAX(AVG_BIRTH_WEIGHT)
+                CAST(AVG(MOTHER_AVG_AGE) AS INTEGER),
+                CAST(MIN(MOTHER_AVG_AGE) AS INTEGER),
+                CAST(MAX(MOTHER_AVG_AGE) AS INTEGER),
+                CAST(AVG(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3)),
+                CAST(MIN(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3)),
+                CAST(MAX(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3))
             INTO
                 total_births,
                 avg_age,
