@@ -141,8 +141,6 @@ CREATE TRIGGER insert_us_births_trigger BEFORE INSERT ON US_BIRTHS FOR EACH ROW 
 
 
 
-
-
 /*
 d) Reporte de información consolidada.
 Se pide crear la función ReporteConsolidado(n) que recibe como parámetro la cantidad de años a
