@@ -22,7 +22,7 @@ CREATE TABLE YEAR_DATA (
 
 CREATE TABLE EDUCATION_LEVEL (
     EDUCATION_LEVEL_CODE INT NOT NULL,
-    EDUCATION_LEVEL VARCHAR(50) NOT NULL,
+    EDUCATION_LEVEL VARCHAR(255) NOT NULL,
     PRIMARY KEY (EDUCATION_LEVEL_CODE)
 );
 
@@ -59,8 +59,8 @@ CREATE TABLE US_BIRTHS (
     EDUCATION_LEVEL INT NOT NULL,
     GENDER VARCHAR(1) NOT NULL,
     BIRTHS INT NOT NULL,
-    MOTHER_AVG_AGE INT NOT NULL,
-    AVG_BIRTH_WEIGHT INT NOT NULL,
+    MOTHER_AVG_AGE DECIMAL(3,1) NOT NULL,
+    AVG_BIRTH_WEIGHT DECIMAL(5,1) NOT NULL,
     FOREIGN KEY (STATE) REFERENCES STATE(ABBR),
     FOREIGN KEY (YEAR_NUMBER) REFERENCES YEAR_DATA(YEAR_NUMBER),
     FOREIGN KEY (EDUCATION_LEVEL) REFERENCES EDUCATION_LEVEL(EDUCATION_LEVEL_CODE),
@@ -74,7 +74,7 @@ Utilizando el comando COPY de PostgreSQL, se deben importar TODOS los datos del 
 la tabla creada en b). El archivo csv provisto por la cátedra NO puede ser modificado.
 */
 
-COPY US_BIRTHS FROM '/us_births_2016_2021.csv' DELIMITER ',' CSV HEADER;
+--\copy US_BIRTHS FROM '/home/jerefefe/Desktop/BD/BD_TPE/us_births_2016_2021.csv' DELIMITER ',' CSV HEADER;
 
 /*
 Creación de un trigger para:
@@ -93,49 +93,88 @@ con la siguiente información:
 
 */
 
+CREATE VIEW US_BIRTHS_VIEW AS 
+        SELECT STATE.NAME AS STATE, 
+                STATE.ABBR AS STATE_ABBREVIATION, 
+                YEAR_DATA.YEAR_NUMBER AS YEAR, 
+                GENDER, 
+                EDUCATION_LEVEL.EDUCATION_LEVEL AS MOTHER_EDUCATION_LEVEL,
+                EDUCATION_LEVEL.EDUCATION_LEVEL_CODE AS EDUCATION_LEVEL_CODE,
+                BIRTHS, 
+                MOTHER_AVG_AGE AS MOTHER_AVERAGE_AGE, 
+                AVG_BIRTH_WEIGHT AS AVERAGE_BIRTH_WEIGHT
+                
+        FROM 
+                US_BIRTHS JOIN STATE ON US_BIRTHS.STATE = STATE.ABBR 
+                JOIN YEAR_DATA ON US_BIRTHS.YEAR_NUMBER = YEAR_DATA.YEAR_NUMBER 
+                JOIN EDUCATION_LEVEL ON US_BIRTHS.EDUCATION_LEVEL = EDUCATION_LEVEL.EDUCATION_LEVEL_CODE;
+
+
+
 CREATE OR REPLACE FUNCTION is_leap_year(year_number INT) RETURNS BOOLEAN AS $$
     BEGIN
-        RETURN year_number % 4 = 0 || (year_number % 100 = 0 && year_number % 400 = 0);
+        RETURN year_number % 4 = 0 OR (year_number % 100 = 0 AND year_number % 400 = 0);
     END;
 $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION insert_us_births() RETURNS TRIGGER AS $$
     DECLARE
-        state_abbr INT;
-        year_number INT;
-        education_level_code INT;
+        state_id VARCHAR(3);
+        year_id INT;
+        education_level_id INT;
         is_leap_year BOOLEAN;
-        data_to_insert US_BIRTHS%ROWTYPE;
+        -- data_to_insert US_BIRTHS%ROWTYPE;
     BEGIN
-        SELECT ABBR INTO state_abbr FROM STATE WHERE ABBR = NEW.State_Abbreviation;
+        RAISE NOTICE 'State: % Abbr: % Year: % Gender:  % MEL: % ELC: % Births: % MAA:  % ABW:  %',
+            NEW.State,
+            NEW.State_Abbreviation,
+            NEW.Year, 
+            NEW.GENDER,
+            NEW.Mother_Education_Level,
+            NEW.Education_Level_Code,
+            NEW.Births, 
+            NEW.Mother_Average_Age, 
+            NEW.Average_Birth_Weight;
+
+        SELECT ABBR INTO state_id FROM STATE WHERE ABBR = NEW.State_Abbreviation;
         IF NOT FOUND THEN
             INSERT INTO STATE (ABBR, NAME) VALUES (NEW.State_Abbreviation, NEW.State);
         END IF;
 
-        SELECT YEAR_NUMBER INTO year_number FROM YEAR_DATA WHERE YEAR_NUMBER = NEW.Year;
+        SELECT YEAR_NUMBER INTO year_id FROM YEAR_DATA WHERE YEAR_NUMBER = NEW.Year;
         IF NOT FOUND THEN
             is_leap_year = is_leap_year(NEW.Year);
-            INSERT INTO YEAR_DATA (YEAR_NUMBER, LEAP_YEAR) VALUES (NEW.YEAR_NUMBER, is_leap_year);
+            INSERT INTO YEAR_DATA (YEAR_NUMBER, LEAP_YEAR) VALUES (NEW.YEAR, is_leap_year);
         END IF;
 
-        SELECT EDUCATION_LEVEL_CODE INTO education_level_code FROM EDUCATION_LEVEL WHERE EDUCATION_LEVEL_CODE = NEW.Education_Level_Code;
+        SELECT EDUCATION_LEVEL_CODE INTO education_level_id FROM EDUCATION_LEVEL WHERE EDUCATION_LEVEL_CODE = NEW.Education_Level_Code;
         IF NOT FOUND THEN
             INSERT INTO EDUCATION_LEVEL (EDUCATION_LEVEL_CODE, EDUCATION_LEVEL) VALUES (NEW.Education_Level_Code, NEW.Mother_Education_Level);
         END IF;
 
-        data_to_insert.STATE = state_abbr;
-        data_to_insert.YEAR_NUMBER = year_number;
-        data_to_insert.EDUCATION_LEVEL = education_level_code;
-        data_to_insert.gender = NEW.gender;
-        data_to_insert.births = NEW.births;
-        data_to_insert.mother_avg_age = NEW.mother_average_age;
-        data_to_insert.avg_birth_weight = NEW.average_birth_weight;
-
-        RETURN data_to_insert;
+        
+        -- data_to_insert.STATE = NEW.State_Abbreviation;
+        -- data_to_insert.YEAR_NUMBER = NEW.Year;
+        -- data_to_insert.EDUCATION_LEVEL = NEW.Education_Level_Code;
+        -- data_to_insert.gender = NEW.gender;
+        -- data_to_insert.births = NEW.births;
+        -- data_to_insert.mother_avg_age = NEW.mother_average_age;
+        -- data_to_insert.avg_birth_weight = NEW.average_birth_weight;
+        -- RAISE NOTICE 'State: % Year: % Gender: % ELC: % Births: % MAA:  % ABW:  %',
+        --     data_to_insert.STATE,
+        --     data_to_insert.YEAR_NUMBER,
+        --     data_to_insert.gender,
+        --     data_to_insert.EDUCATION_LEVEL,
+        --     data_to_insert.births,
+        --     data_to_insert.mother_avg_age,
+        --     data_to_insert.mother_avg_age;
+                    
+        INSERT INTO US_BIRTHS VALUES (NEW.State_Abbreviation, NEW.Year, NEW.Education_Level_Code, NEW.gender, NEW.births, NEW.mother_average_age, NEW.average_birth_weight );
+        RETURN NULL;
     END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER insert_us_births_trigger BEFORE INSERT ON US_BIRTHS FOR EACH ROW EXECUTE PROCEDURE insert_us_births();
+CREATE OR REPLACE TRIGGER insert_us_births_trigger INSTEAD OF INSERT ON US_BIRTHS_VIEW FOR EACH ROW EXECUTE PROCEDURE insert_us_births();
 
 
 
@@ -178,7 +217,7 @@ DECLARE
     current_year INTEGER;
     state_code TEXT;
     gender_code TEXT;
-    education_level_code TEXT;
+    education_level_code INTEGER;
     total_births BIGINT;
     avg_age NUMERIC;
     min_age INTEGER;
@@ -206,13 +245,13 @@ BEGIN
     FOR current_year IN first_year..last_year LOOP
         -- Get the total births, average age, minimum age, maximum age, average weight, minimum weight, and maximum weight for the year
         SELECT
-            SUM(TOTAL_BIRTHS),
-            AVG(MOTHER_AGE),
-            MIN(MOTHER_AGE),
-            MAX(MOTHER_AGE),
-            AVG(BABY_WEIGHT),
-            MIN(BABY_WEIGHT),
-            MAX(BABY_WEIGHT)
+            SUM(BIRTHS),
+            AVG(MOTHER_AVG_AGE),
+            MIN(MOTHER_AVG_AGE),
+            MAX(MOTHER_AVG_AGE),
+            AVG(AVG_BIRTH_WEIGHT),
+            MIN(AVG_BIRTH_WEIGHT),
+            MAX(AVG_BIRTH_WEIGHT)
         INTO
             total_births,
             avg_age,
@@ -229,7 +268,7 @@ BEGIN
         -- Check if there is data for the year
         IF total_births IS NOT NULL THEN
             -- Print the year, state category, and corresponding metrics
-            RAISE NOTICE '% % % % % % % % % % % %',
+            RAISE NOTICE '% % % % % % % % %',
                 current_year,
                 'State',
                 total_births,
@@ -246,7 +285,7 @@ BEGIN
                     STATE.ABBR
                 FROM
                     US_BIRTHS
-                    JOIN STATE ON US_BIRTHS.STATE = STATE.ID
+                    JOIN STATE ON US_BIRTHS.STATE = STATE.ABBR
                 WHERE
                     YEAR_NUMBER = current_year
                 GROUP BY
@@ -258,13 +297,13 @@ BEGIN
             ) LOOP
                 -- Get the metrics for the current state and year
                 SELECT
-                    SUM(TOTAL_BIRTHS),
-                    AVG(MOTHER_AGE),
-                    MIN(MOTHER_AGE),
-                    MAX(MOTHER_AGE),
-                    AVG(BABY_WEIGHT),
-                    MIN(BABY_WEIGHT),
-                    MAX(BABY_WEIGHT)
+                        SUM(BIRTHS),
+                        AVG(MOTHER_AVG_AGE),
+                        MIN(MOTHER_AVG_AGE),
+                        MAX(MOTHER_AVG_AGE),
+                        AVG(AVG_BIRTH_WEIGHT),
+                        MIN(AVG_BIRTH_WEIGHT),
+                        MAX(AVG_BIRTH_WEIGHT)
                 INTO
                     total_births,
                     avg_age,
@@ -275,13 +314,13 @@ BEGIN
                     max_weight
                 FROM
                     US_BIRTHS
-                    JOIN STATE ON US_BIRTHS.STATE = STATE.ID
+                    JOIN STATE ON US_BIRTHS.STATE = STATE.ABBR
                 WHERE
                     YEAR_NUMBER = current_year
                     AND STATE.ABBR = state_code;
 
                 -- Print the state and corresponding metrics
-                RAISE NOTICE '% % % % % % % % % % % %',
+                RAISE NOTICE '% % % % % % % % %',
                     '',
                     state_code,
                     total_births,
@@ -301,13 +340,13 @@ BEGIN
         ) LOOP
             -- Get the metrics for the current gender and year
             SELECT
-                SUM(TOTAL_BIRTHS),
-                AVG(MOTHER_AGE),
-                MIN(MOTHER_AGE),
-                MAX(MOTHER_AGE),
-                AVG(BABY_WEIGHT),
-                MIN(BABY_WEIGHT),
-                MAX(BABY_WEIGHT)
+                SUM(BIRTHS),
+                AVG(MOTHER_AVG_AGE),
+                MIN(MOTHER_AVG_AGE),
+                MAX(MOTHER_AVG_AGE),
+                AVG(AVG_BIRTH_WEIGHT),
+                MIN(AVG_BIRTH_WEIGHT),
+                MAX(AVG_BIRTH_WEIGHT)
             INTO
                 total_births,
                 avg_age,
@@ -323,7 +362,7 @@ BEGIN
                 AND GENDER = gender_code;
 
             -- Print the gender and corresponding metrics
-            RAISE NOTICE '% % % % % % % % % % % %',
+            RAISE NOTICE '% % % % % % % % %',
                 '',
                 gender_code,
                 total_births,
@@ -337,19 +376,19 @@ BEGIN
 
         -- Iterate over each education level category
         FOR education_level_code IN (
-            SELECT DISTINCT EDUCATION_LEVEL_CODE FROM US_BIRTHS
+            SELECT DISTINCT EDUCATION_LEVEL FROM US_BIRTHS
             WHERE YEAR_NUMBER = current_year
-                AND EDUCATION_LEVEL_CODE NOT IN ('Unknown', 'Not reported')
+                AND EDUCATION_LEVEL > 0
         ) LOOP
             -- Get the metrics for the current education level and year
             SELECT
-                SUM(TOTAL_BIRTHS),
-                AVG(MOTHER_AGE),
-                MIN(MOTHER_AGE),
-                MAX(MOTHER_AGE),
-                AVG(BABY_WEIGHT),
-                MIN(BABY_WEIGHT),
-                MAX(BABY_WEIGHT)
+                SUM(BIRTHS),
+                AVG(MOTHER_AVG_AGE),
+                MIN(MOTHER_AVG_AGE),
+                MAX(MOTHER_AVG_AGE),
+                AVG(AVG_BIRTH_WEIGHT),
+                MIN(AVG_BIRTH_WEIGHT),
+                MAX(AVG_BIRTH_WEIGHT)
             INTO
                 total_births,
                 avg_age,
@@ -362,10 +401,10 @@ BEGIN
                 US_BIRTHS
             WHERE
                 YEAR_NUMBER = current_year
-                AND EDUCATION_LEVEL_CODE = education_level_code;
+                AND EDUCATION_LEVEL = education_level_code;
 
             -- Print the education level and corresponding metrics
-            RAISE NOTICE '% % % % % % % % % % % %',
+            RAISE NOTICE '% % % % % % % % %',
                 '',
                 education_level_code,
                 total_births,
@@ -378,7 +417,7 @@ BEGIN
         END LOOP;
 
         -- Print the total metrics for the year
-        RAISE NOTICE '% Total % % % % % % % %',
+        RAISE NOTICE '% Total % % % % % % %',
             '',
             total_births,
             avg_age,
@@ -389,3 +428,8 @@ BEGIN
             max_weight;
     END IF;
 END LOOP;
+    END;
+$$ LANGUAGE plpgsql;
+
+SELECT ReporteConsolidado(1) FROM education_level
+
