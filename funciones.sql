@@ -23,7 +23,8 @@ CREATE TABLE YEAR_DATA (
 CREATE TABLE EDUCATION_LEVEL (
     EDUCATION_LEVEL_CODE INT NOT NULL,
     MOTHER_EDUCATION_LEVEL VARCHAR(255) NOT NULL,
-    PRIMARY KEY (EDUCATION_LEVEL_CODE)
+    PRIMARY KEY (EDUCATION_LEVEL_CODE),
+    UNIQUE (MOTHER_EDUCATION_LEVEL)
 );
 
 /*
@@ -61,10 +62,10 @@ CREATE TABLE US_BIRTHS (
     BIRTHS INT NOT NULL,
     MOTHER_AVERAGE_AGE DECIMAL(3,1) NOT NULL,
     AVERAGE_BIRTH_WEIGHT DECIMAL(5,1) NOT NULL,
+    PRIMARY KEY (STATE_ABBREVIATION,YEAR,EDUCATION_LEVEL_CODE,GENDER),
     FOREIGN KEY (STATE_ABBREVIATION) REFERENCES STATE(STATE_ABBREVIATION),
     FOREIGN KEY (YEAR) REFERENCES YEAR_DATA(YEAR),
-    FOREIGN KEY (EDUCATION_LEVEL_CODE) REFERENCES EDUCATION_LEVEL(EDUCATION_LEVEL_CODE),
-    PRIMARY KEY (STATE_ABBREVIATION,YEAR,EDUCATION_LEVEL_CODE,GENDER)
+    FOREIGN KEY (EDUCATION_LEVEL_CODE) REFERENCES EDUCATION_LEVEL(EDUCATION_LEVEL_CODE)
 );
 
 
@@ -113,17 +114,16 @@ CREATE VIEW US_BIRTHS_VIEW AS
 
 CREATE OR REPLACE FUNCTION is_leap_year(year_number INT) RETURNS BOOLEAN AS $$
     BEGIN
-        RETURN year_number % 4 = 0 OR (year_number % 100 = 0 AND year_number % 400 = 0);
+        RETURN (year_number % 4 = 0 AND year_number % 100 <> 0) OR year_number % 400 = 0;
     END;
 $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION insert_us_births() RETURNS TRIGGER AS $$
     DECLARE
-        state_id VARCHAR(3);
+        state_id VARCHAR(2);
         year_id INT;
         education_level_id INT;
         is_leap_year BOOLEAN;
-        -- data_to_insert US_BIRTHS%ROWTYPE;
     BEGIN
         SELECT STATE_ABBREVIATION INTO state_id FROM STATE WHERE STATE_ABBREVIATION = NEW.State_Abbreviation;
         IF NOT FOUND THEN
@@ -147,10 +147,6 @@ CREATE OR REPLACE FUNCTION insert_us_births() RETURNS TRIGGER AS $$
 $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE TRIGGER insert_us_births_trigger INSTEAD OF INSERT ON US_BIRTHS_VIEW FOR EACH ROW EXECUTE PROCEDURE insert_us_births();
-
-
-
-
 
 /*
 d) Reporte de información consolidada.
@@ -182,225 +178,236 @@ En caso de que no existieran datos para los parámetros ingresados, no se debe m
 siquiera el encabezado del reporte).
 */
 
-CREATE OR REPLACE FUNCTION ReporteConsolidado(n INT) RETURNS VOID AS $$
-DECLARE
-    first_year INTEGER;
-    last_year INTEGER;
-    current_year INTEGER;
-    state_code TEXT;
-    gender_code TEXT;
-    education_level_code INTEGER;
-    total_births BIGINT;
-    avg_age INTEGER;
-    min_age INTEGER;
-    max_age INTEGER;
-    avg_weight DECIMAL(4,3);
-    min_weight DECIMAL(4,3);
-    max_weight DECIMAL(4,3);
-BEGIN
-    -- Get the first year in the table
-    SELECT MIN(YEAR_NUMBER) INTO first_year FROM YEAR_DATA;
+CREATE TYPE us_births_data AS (
+    births BIGINT,
+    avg_mother_average_age INTEGER,
+    min_mother_average_age INTEGER,
+    max_mother_average_age INTEGER,
+    avg_average_birth_weight DECIMAL(4, 3),
+    min_average_birth_weight DECIMAL(4, 3),
+    max_average_birth_weight DECIMAL(4, 3)
+);
 
-    -- Check if there is data in the table
+CREATE OR REPLACE FUNCTION PrintMetrics(pData us_births_data, pCategory TEXT) RETURNS VOID AS
+$$
+DECLARE
+BEGIN
+
+    -- Print the state and corresponding metrics
+    RAISE INFO '% % % % % % % %',
+        pCategory,
+        FORMAT('%-10s', pData.births),
+        FORMAT('   %-10s', pData.avg_mother_average_age),
+        FORMAT('%-10s', pData.min_mother_average_age),
+        FORMAT('%-10s', pData.max_mother_average_age),
+        FORMAT('%-10s', pData.avg_average_birth_weight),
+        FORMAT('%-10s', pData.min_average_birth_weight),
+        FORMAT('%-10s', pData.max_average_birth_weight);
+
+END
+$$ LANGUAGE plpgsql;
+
+
+
+CREATE OR REPLACE FUNCTION ReportStates(pYear INT) RETURNS VOID AS
+$$
+DECLARE
+    rState  US_BIRTHS_VIEW.state%TYPE;
+    cState CURSOR FOR
+        SELECT STATE
+        FROM US_BIRTHS_VIEW
+        WHERE YEAR = pYear
+        GROUP BY STATE
+        HAVING SUM(BIRTHS) > 200000
+        ORDER BY STATE DESC;
+    pData us_births_data;
+    isFirst BOOLEAN := TRUE;
+BEGIN
+    OPEN cState;
+    LOOP
+        FETCH NEXT FROM cState INTO rState;
+        EXIT WHEN NOT FOUND;
+
+        SELECT SUM(births),
+               CAST(ROUND(AVG(mother_average_age)) AS INTEGER),
+               CAST(ROUND(MIN(mother_average_age)) AS INTEGER),
+               CAST(ROUND(MAX(mother_average_age)) AS INTEGER),
+               CAST(AVG(average_birth_weight) / 1000 AS DECIMAL(4, 3)),
+               CAST(MIN(average_birth_weight) / 1000 AS DECIMAL(4, 3)),
+               CAST(MAX(average_birth_weight) / 1000 AS DECIMAL(4, 3))
+        INTO pData
+        FROM US_BIRTHS_VIEW
+        WHERE state = rState AND year = pYear;
+
+        IF isFirst THEN
+            PERFORM PrintMetrics(pData, FORMAT('%s %-80s', pYear, FORMAT('State: %s', rState)));
+        ELSE
+            PERFORM PrintMetrics(pData, FORMAT('---- %-80s', FORMAT('State: %s', rState)));
+        END IF;
+        isFirst := FALSE;
+
+    END LOOP;
+    CLOSE cState;
+
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION ReportGender(pYear INT) RETURNS VOID AS
+$$
+DECLARE
+    rGender US_BIRTHS_VIEW.gender%TYPE;
+    cGender CURSOR FOR
+        SELECT GENDER
+        FROM US_BIRTHS_VIEW
+        WHERE YEAR = pYear
+        GROUP BY GENDER
+        ORDER BY GENDER DESC;
+    pData us_births_data;
+BEGIN
+    OPEN cGender;
+    LOOP
+        FETCH NEXT FROM cGender INTO rGender;
+        EXIT WHEN NOT FOUND;
+
+        SELECT SUM(births),
+               CAST(ROUND(AVG(mother_average_age)) AS INTEGER),
+               CAST(ROUND(MIN(mother_average_age)) AS INTEGER),
+               CAST(ROUND(MAX(mother_average_age)) AS INTEGER),
+               CAST(AVG(average_birth_weight) / 1000 AS DECIMAL(4, 3)),
+               CAST(MIN(average_birth_weight) / 1000 AS DECIMAL(4, 3)),
+               CAST(MAX(average_birth_weight) / 1000 AS DECIMAL(4, 3))
+        INTO pData
+        FROM US_BIRTHS_VIEW
+        WHERE GENDER = rGender AND YEAR = pYear;
+
+        PERFORM PrintMetrics(pData, FORMAT('---- %-80s', FORMAT('Gender: %s', CASE
+                                                                                  WHEN rGender = 'F' THEN 'Female'
+                                                                                  ELSE 'Male' END)));
+
+    END LOOP;
+    CLOSE cGender;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION ReportEducationLevel(pYear INT) RETURNS VOID AS
+$$
+DECLARE
+    rEducation_level US_BIRTHS_VIEW.EDUCATION_LEVEL_CODE%TYPE;
+    cEducation_level CURSOR FOR
+        SELECT EDUCATION_LEVEL_CODE
+        FROM US_BIRTHS_VIEW
+        WHERE YEAR = pYear
+          AND EDUCATION_LEVEL_CODE <> -9
+        GROUP BY EDUCATION_LEVEL_CODE
+        ORDER BY EDUCATION_LEVEL_CODE ASC;
+    pData us_births_data;
+BEGIN
+    OPEN cEducation_level;
+    LOOP
+        FETCH NEXT FROM cEducation_level INTO rEducation_level;
+        EXIT WHEN NOT FOUND;
+
+        -- Get the metrics for the current education level and year
+        SELECT SUM(births),
+               CAST(ROUND(AVG(mother_average_age)) AS INTEGER),
+               CAST(ROUND(MIN(mother_average_age)) AS INTEGER),
+               CAST(ROUND(MAX(mother_average_age)) AS INTEGER),
+               CAST(AVG(average_birth_weight) / 1000 AS DECIMAL(4, 3)),
+               CAST(MIN(average_birth_weight) / 1000 AS DECIMAL(4, 3)),
+               CAST(MAX(average_birth_weight) / 1000 AS DECIMAL(4, 3))
+        INTO pData
+        FROM US_BIRTHS_VIEW
+        WHERE education_level_code = rEducation_level
+          AND YEAR = pYear;
+
+        PERFORM PrintMetrics(pData, FORMAT('---- %-80s', FORMAT('Education: %s', (SELECT mother_education_level
+                                                                                  FROM EDUCATION_LEVEL
+                                                                                  WHERE education_level_code = rEducation_level))));
+
+    END LOOP;
+    CLOSE cEducation_level;
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE OR REPLACE FUNCTION ReporteConsolidado(n INT) RETURNS VOID AS
+$$
+DECLARE
+    first_year US_BIRTHS_VIEW.year%TYPE;
+    last_year US_BIRTHS_VIEW.year%TYPE;
+    cYear CURSOR FOR
+        SELECT YEAR
+        FROM YEAR_DATA
+        WHERE YEAR BETWEEN first_year AND last_year;
+    rYear US_BIRTHS_VIEW.year%TYPE;
+    pData us_births_data;
+BEGIN
+    SELECT MIN(YEAR) INTO first_year FROM YEAR_DATA;
+
     IF first_year IS NULL THEN
         RETURN;
     END IF;
 
-    -- Set the last year based on the number of years to show
     last_year := first_year + n - 1;
 
+    IF last_year > (SELECT MAX(YEAR) FROM YEAR_DATA) THEN
+        last_year := (SELECT MAX(YEAR) FROM YEAR_DATA);
+    END IF;
+
+    IF last_year - first_year + 1 = 0 THEN
+        RETURN;
+    END IF;
+
     -- Print the report header
-    RAISE NOTICE 'CONSOLIDATED BIRTH REPORT';
-    RAISE NOTICE 'Year Category Total AvgAge MinAge MaxAge AvgWeight MinWeight MaxWeight';
+    RAISE INFO '%', LPAD(' ', 165, '-');
+    RAISE INFO '%', RPAD(LPAD('CONSOLIDATED BIRTH REPORT', 94, '-'), 164, '-');
+    RAISE INFO '%', LPAD(' ', 165, '-');
+    RAISE INFO '% % % % % % % % %',
+        FORMAT('%s', 'Year'),
+        FORMAT('%-80s', 'Category'),
+        FORMAT('%-10s', 'Total'),
+        FORMAT('%-10s', 'Avg Age'),
+        FORMAT('%-10s', 'Min Age'),
+        FORMAT('%-10s', 'Max Age'),
+        FORMAT('%-10s', 'Avg Weight'),
+        FORMAT('%-10s', 'Min Weight'),
+        FORMAT('%-10s', 'Max Weight');
+    RAISE INFO '%', LPAD(' ', 165, '-');
 
-    -- Iterate over each year
-    FOR current_year IN first_year..last_year LOOP
-        -- Get the total births, average age, minimum age, maximum age, average weight, minimum weight, and maximum weight for the year
-        SELECT
-            SUM(BIRTHS),
-            CAST(AVG(MOTHER_AVG_AGE) AS INTEGER),
-            CAST(MIN(MOTHER_AVG_AGE) AS INTEGER),
-            CAST(MAX(MOTHER_AVG_AGE) AS INTEGER),
-            CAST(AVG(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3)),
-            CAST(MIN(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3)),
-            CAST(MAX(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3))
-        INTO
-            total_births,
-            avg_age,
-            min_age,
-            max_age,
-            avg_weight,
-            min_weight,
-            max_weight
-        FROM
-            US_BIRTHS
-        WHERE
-            YEAR_NUMBER = current_year;
+    OPEN cYear;
+    LOOP
+        FETCH NEXT FROM cYear INTO rYear;
+        EXIT WHEN NOT FOUND;
 
-        -- Check if there is data for the year
-        IF total_births IS NOT NULL THEN
-            -- Print the year, state category, and corresponding metrics
-            RAISE NOTICE '% % % % % % % % %',
-                current_year,
-                'State',
-                total_births,
-                avg_age,
-                min_age,
-                max_age,
-                avg_weight,
-                min_weight,
-                max_weight;
-
-            -- Iterate over each state with more than 200,000 births
-            FOR state_code IN (
-                SELECT
-                    STATE
-                FROM
-                    US_BIRTHS_VIEW
-                WHERE
-                    YEAR = current_year
-                GROUP BY
-                    STATE
-                HAVING
-                    SUM(BIRTHS) > 200000
-                ORDER BY
-                    STATE DESC
-            ) LOOP
-                -- Get the metrics for the current state and year
-                SELECT
-                        SUM(BIRTHS),
-                        CAST(AVG(MOTHER_AVG_AGE) AS INTEGER),
-                        CAST(MIN(MOTHER_AVG_AGE) AS INTEGER),
-                        CAST(MAX(MOTHER_AVG_AGE) AS INTEGER),
-                        CAST(AVG(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3)),
-                        CAST(MIN(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3)),
-                        CAST(MAX(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3))
-                INTO
-                    total_births,
-                    avg_age,
-                    min_age,
-                    max_age,
-                    avg_weight,
-                    min_weight,
-                    max_weight
-                FROM
-                    US_BIRTHS
-                    JOIN STATE ON US_BIRTHS.STATE = STATE.ABBR
-                WHERE
-                    YEAR_NUMBER = current_year
-                    AND STATE.ABBR = state_code;
-
-                -- Print the state and corresponding metrics
-                RAISE NOTICE '% % % % % % % % %',
-                    '',
-                    state_code,
-                    total_births,
-                    avg_age,
-                    min_age,
-                    max_age,
-                    avg_weight,        
-                    min_weight,
-                    max_weight;
-                    END LOOP;
-                    
+        -- Iterate over each state with more than 200,000 births
+        PERFORM ReportStates(rYear);
 
         -- Iterate over each gender category
-        FOR gender_code IN (
-            SELECT DISTINCT GENDER FROM US_BIRTHS
-            WHERE YEAR_NUMBER = current_year
-        ) LOOP
-            -- Get the metrics for the current gender and year
-            SELECT
-                SUM(BIRTHS),
-                CAST(AVG(MOTHER_AVG_AGE) AS INTEGER),
-                CAST(MIN(MOTHER_AVG_AGE) AS INTEGER),
-                CAST(MAX(MOTHER_AVG_AGE) AS INTEGER),
-                CAST(AVG(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3)),
-                CAST(MIN(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3)),
-                CAST(MAX(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3))
-            INTO
-                total_births,
-                avg_age,
-                min_age,
-                max_age,
-                avg_weight,
-                min_weight,
-                max_weight
-            FROM
-                US_BIRTHS
-            WHERE
-                YEAR_NUMBER = current_year
-                AND GENDER = gender_code;
-
-            -- Print the gender and corresponding metrics
-            RAISE NOTICE '% % % % % % % % %',
-                '',
-                gender_code,
-                total_births,
-                avg_age,
-                min_age,
-                max_age,
-                avg_weight,
-                min_weight,
-                max_weight;
-        END LOOP;
+        PERFORM ReportGender(rYear);
 
         -- Iterate over each education level category
-        FOR education_level_code IN (
-            SELECT DISTINCT EDUCATION_LEVEL FROM US_BIRTHS
-            WHERE YEAR_NUMBER = current_year
-                AND EDUCATION_LEVEL > 0
-        ) LOOP
-            -- Get the metrics for the current education level and year
-            SELECT
-                SUM(BIRTHS),
-                CAST(AVG(MOTHER_AVG_AGE) AS INTEGER),
-                CAST(MIN(MOTHER_AVG_AGE) AS INTEGER),
-                CAST(MAX(MOTHER_AVG_AGE) AS INTEGER),
-                CAST(AVG(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3)),
-                CAST(MIN(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3)),
-                CAST(MAX(AVG_BIRTH_WEIGHT) AS DECIMAL(4,3))
-            INTO
-                total_births,
-                avg_age,
-                min_age,
-                max_age,
-                avg_weight,
-                min_weight,
-                max_weight
-            FROM
-                US_BIRTHS
-            WHERE
-                YEAR_NUMBER = current_year
-                AND EDUCATION_LEVEL = education_level_code;
+        PERFORM ReportEducationLevel(rYear);
 
-            -- Print the education level and corresponding metrics
-            RAISE NOTICE '% % % % % % % % %',
-                '',
-                education_level_code,
-                total_births,
-                avg_age,
-                min_age,
-                max_age,
-                avg_weight,
-                min_weight,
-                max_weight;
-        END LOOP;
+        -- Get the total births, average age, minimum age, maximum age, average weight, minimum weight, and maximum weight for the year
+        SELECT SUM(births),
+               CAST(ROUND(AVG(mother_average_age)) AS INTEGER),
+               CAST(ROUND(MIN(mother_average_age)) AS INTEGER),
+               CAST(ROUND(MAX(mother_average_age)) AS INTEGER),
+               CAST(AVG(average_birth_weight) / 1000 AS DECIMAL(4, 3)),
+               CAST(MIN(average_birth_weight) / 1000 AS DECIMAL(4, 3)),
+               CAST(MAX(average_birth_weight) / 1000 AS DECIMAL(4, 3))
+        INTO
+            pData
+        FROM us_births_view
+        WHERE year = rYear;
 
         -- Print the total metrics for the year
-        RAISE NOTICE '% Total % % % % % % %',
-            '',
-            total_births,
-            avg_age,
-            min_age,
-            max_age,
-            avg_weight,
-            min_weight,
-            max_weight;
-    END IF;
-END LOOP;
-    END;
+        PERFORM PrintMetrics(pData, RPAD('-', 85,'-'));
+
+        RAISE INFO '%', LPAD(' ', 165, '-');
+    END LOOP;
+    CLOSE cYear;
+
+    RAISE INFO '%', LPAD(' ', 165, '-');
+END;
 $$ LANGUAGE plpgsql;
-
-SELECT ReporteConsolidado(1) FROM education_level
-
