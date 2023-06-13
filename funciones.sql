@@ -1,12 +1,3 @@
-/*
-    Deben crearse las tablas de las distintas dimensiones con las siguientes condiciones mínimas:
-• ESTADO: debe tener un campo identificatorio y un campo con el nombre del estado
-• ANIO: debe tener un campo identificatorio y un campo que indique si el año es bisiesto
-• NIVEL_EDUCACION: debe tener un campo identificatorio y un campo con la descripción del
-nivel de educación
-Se deben crear las claves y constraints apropiados.
-*/
-
 CREATE TABLE STATE (
     STATE VARCHAR(50) NOT NULL,
     STATE_ABBREVIATION VARCHAR(2) NOT NULL,
@@ -27,38 +18,13 @@ CREATE TABLE EDUCATION_LEVEL (
     UNIQUE (MOTHER_EDUCATION_LEVEL)
 );
 
-/*
- Creación de la tabla definitiva.
-Debe crearse una tabla definitiva que será la receptora de los datos provenientes del archivo
-us_births_2016_2021.csv. Los campos y restricciones de la tabla deben crearse en base al análisis
-de los datos.
-Recordar que los archivos csv son archivos de texto que pueden abrirse fácilmente con cualquier
-editor.
-Para el caso particular de los campos state, state_abbreviation, year, mother_education_level y
-education_level_code, se deberá cambiar su contenido para que el mismo haga referencia a la key
-de la tablas creadas en el punto a), antes de insertarlos en la tabla definitiva.
-En base a los datos, se debe crear la clave y constraints apropiados.
-
-Las columnas del archivo son:
-● State: nombre del estado de Estados Unidos del cual provienen los nacimientos
-● State_Abbreviation: código del nombre del estado de Estados Unidos
-● Year: año calendario en el cual se sucedieron los nacimientos
-● Gender: código del género de los bebés
-● Mother_Education_Level: nivel de educación de las madres de los bebés
-● Education_Level_Code: código del nivel de educación de las madres de los bebés
-● Births: cantidad total de bebés nacidos
-● Mother_Average_Age: promedio de edad de las madres de los bebés, expresado en años
-● Average_Birth_Weight: promedio del peso de los bebés, expresado en gramos
-Antes de insertar el archivo en una tabla definitiva, se quiere interceptar la inserción del estado, del
-año y del nivel de educación de las madres, y cambiarlas por una FK a diferentes dimensiones
-representadas en las tablas ESTADO, ANIO y NIVEL_EDUCACION.
-*/
+CREATE DOMAIN GENDER_TYPE AS VARCHAR(1) CHECK (VALUE IN ('M', 'F'));
 
 CREATE TABLE US_BIRTHS (
     STATE_ABBREVIATION VARCHAR(2) NOT NULL,
     YEAR INT NOT NULL,
     EDUCATION_LEVEL_CODE INT NOT NULL,
-    GENDER VARCHAR(1) NOT NULL,
+    GENDER GENDER_TYPE NOT NULL,
     BIRTHS INT NOT NULL,
     MOTHER_AVERAGE_AGE DECIMAL(3,1) NOT NULL,
     AVERAGE_BIRTH_WEIGHT DECIMAL(5,1) NOT NULL,
@@ -67,32 +33,6 @@ CREATE TABLE US_BIRTHS (
     FOREIGN KEY (YEAR) REFERENCES YEAR_DATA(YEAR),
     FOREIGN KEY (EDUCATION_LEVEL_CODE) REFERENCES EDUCATION_LEVEL(EDUCATION_LEVEL_CODE)
 );
-
-
-/*
-c) Importación de los datos.
-Utilizando el comando COPY de PostgreSQL, se deben importar TODOS los datos del archivo csv en
-la tabla creada en b). El archivo csv provisto por la cátedra NO puede ser modificado.
-*/
-
---\copy US_BIRTHS FROM '/home/jerefefe/Desktop/BD/BD_TPE/us_births_2016_2021.csv' DELIMITER ',' CSV HEADER;
-
-/*
-Creación de un trigger para:
-1) Determinar la FK de las distintas dimensiones
-Para insertar los datos en la tabla definitiva es necesario interceptar la inserción del estado, año y
-nivel educativo de la madre, y luego identicar la FK a cada una de las dimensiones de las tablas
-creadas en el punto a).
-2) Cargar los valores de las dimensiones
-Además de insertar los datos del archivo, se deben poblar las distintas tablas que conforman las
-distintas dimensiones, siempre y cuando los valores correspondientes no existan en dichas tablas.
-
-Por ejemplo, si partimos con la tabla ESTADO vacía y si al principio en el archivo CSV viene el estado
-”Alabama” con la abreviación ”AL”, se debe insertar una tupla en la tabla ESTADO, quedando la tabla
-con la siguiente información:
-• ESTADO: ”AL”, ”Alabama”
-
-*/
 
 CREATE VIEW US_BIRTHS_VIEW AS 
         SELECT STATE.STATE AS STATE, 
@@ -111,7 +51,6 @@ CREATE VIEW US_BIRTHS_VIEW AS
                 JOIN EDUCATION_LEVEL ON US_BIRTHS.EDUCATION_LEVEL_CODE = EDUCATION_LEVEL.EDUCATION_LEVEL_CODE;
 
 
-
 CREATE OR REPLACE FUNCTION is_leap_year(year_number INT) RETURNS BOOLEAN AS $$
     BEGIN
         RETURN (year_number % 4 = 0 AND year_number % 100 <> 0) OR year_number % 400 = 0;
@@ -120,13 +59,19 @@ $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION insert_us_births() RETURNS TRIGGER AS $$
     DECLARE
-        state_id VARCHAR(2);
-        year_id INT;
-        education_level_id INT;
+        state_id US_BIRTHS_VIEW.state_abbreviation%TYPE;
+        state_name US_BIRTHS_VIEW.state%TYPE;
+        year_id US_BIRTHS_VIEW.year%TYPE;
+        education_level_id US_BIRTHS_VIEW.education_level_code%TYPE;
+        education_level_name US_BIRTHS_VIEW.mother_education_level%TYPE;
         is_leap_year BOOLEAN;
     BEGIN
-        SELECT STATE_ABBREVIATION INTO state_id FROM STATE WHERE STATE_ABBREVIATION = NEW.State_Abbreviation;
-        IF NOT FOUND THEN
+        SELECT STATE_ABBREVIATION, state INTO state_id, state_name FROM STATE WHERE STATE_ABBREVIATION = NEW.State_Abbreviation;
+        IF FOUND THEN
+            IF state_name <> NEW.State THEN
+                RAISE EXCEPTION 'State abbreviation % does not match state name %. Previous state name was %', NEW.State_Abbreviation, NEW.State, state_name;
+            END IF;
+        ELSE
             INSERT INTO STATE (STATE_ABBREVIATION, STATE) VALUES (NEW.State_Abbreviation, NEW.State);
         END IF;
 
@@ -136,8 +81,12 @@ CREATE OR REPLACE FUNCTION insert_us_births() RETURNS TRIGGER AS $$
             INSERT INTO YEAR_DATA (YEAR, LEAP) VALUES (NEW.YEAR, is_leap_year);
         END IF;
 
-        SELECT EDUCATION_LEVEL_CODE INTO education_level_id FROM EDUCATION_LEVEL WHERE EDUCATION_LEVEL_CODE = NEW.Education_Level_Code;
-        IF NOT FOUND THEN
+        SELECT EDUCATION_LEVEL_CODE, MOTHER_EDUCATION_LEVEL INTO education_level_id, education_level_name FROM EDUCATION_LEVEL WHERE EDUCATION_LEVEL_CODE = NEW.Education_Level_Code;
+        IF FOUND THEN
+            IF education_level_name <> NEW.Mother_Education_Level THEN
+                RAISE EXCEPTION 'Education level code % does not match education level %. Previous education level was %', NEW.Education_Level_Code, NEW.Mother_Education_Level, education_level_name;
+            END IF;
+        ELSE
             INSERT INTO EDUCATION_LEVEL (EDUCATION_LEVEL_CODE, MOTHER_EDUCATION_LEVEL) VALUES (NEW.Education_Level_Code, NEW.Mother_Education_Level);
         END IF;
                     
@@ -147,36 +96,6 @@ CREATE OR REPLACE FUNCTION insert_us_births() RETURNS TRIGGER AS $$
 $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE TRIGGER insert_us_births_trigger INSTEAD OF INSERT ON US_BIRTHS_VIEW FOR EACH ROW EXECUTE PROCEDURE insert_us_births();
-
-/*
-d) Reporte de información consolidada.
-Se pide crear la función ReporteConsolidado(n) que recibe como parámetro la cantidad de años a
-mostrar tomando como base el primer año cargado en la tabla definitiva, la cual genere un reporte
-mostrando para cada año y categoría, la cantidad total de nacimientos, la edad promedio de las
-madres, la edad mínima, la edad máxima, el promedio de peso de los bebés, el peso mínimo y el
-peso máximo. Los 3 pesos expresados en kilogramos.
-El reporte tendrá las siguientes características:
-I. Título del reporte:
- "CONSOLIDATED BIRTH REPORT”
-II. Encabezado de columnas:
-“Year Category Total AvgAge MinAge MaxAge AvgWeight MinWeight
-MaxWeight”
-III. Por cada año tiene que aparecer un renglón en el reporte, con los años ordenados de menor
-a mayor. La primer categoría de agrupación (State) con sus valores ordenados
-alfabéticamente en forma descendente y sus métricas (Total, AvgAge, MinAge, MaxAge,
-AvgWeight, MinWeight y MaxWeight), deben estar en el mismo renglón que el año. El resto
-de las categorías (Gender y Education Level), encolumnados a continuación en los renglones
-subsiguientes:
-o Para la categoría de Estados, solo interesa reportar aquellos donde haya habido más de
-200.000 nacimientos
-o Para la categoría de Nivel de Educación de la madre, solo interesa reportar los niveles de
-educación categorizados con algún valor relevante. Es decir, no considerar cuando el nivel de
-educación es desconocido o no informado
-IV. Al final de los renglones, tiene que aparecer el total de las métricas Total, AvgAge, MinAge,
-MaxAge, AvgWeight, MinWeight y MaxWeight correspondientes para ese año
-En caso de que no existieran datos para los parámetros ingresados, no se debe mostrar nada (ni
-siquiera el encabezado del reporte).
-*/
 
 CREATE TYPE us_births_data AS (
     births BIGINT,
@@ -298,8 +217,8 @@ DECLARE
         FROM US_BIRTHS_VIEW
         WHERE YEAR = pYear
           AND EDUCATION_LEVEL_CODE <> -9
-        GROUP BY EDUCATION_LEVEL_CODE
-        ORDER BY EDUCATION_LEVEL_CODE ASC;
+        GROUP BY EDUCATION_LEVEL_CODE, MOTHER_EDUCATION_LEVEL
+        ORDER BY MOTHER_EDUCATION_LEVEL DESC;
     pData us_births_data;
 BEGIN
     OPEN cEducation_level;
@@ -342,6 +261,11 @@ DECLARE
     rYear US_BIRTHS_VIEW.year%TYPE;
     pData us_births_data;
 BEGIN
+
+    IF n < 0 THEN
+        RAISE EXCEPTION 'Invalid number of years';
+    END IF;
+
     SELECT MIN(YEAR) INTO first_year FROM YEAR_DATA;
 
     IF first_year IS NULL THEN
@@ -409,5 +333,6 @@ BEGIN
     CLOSE cYear;
 
     RAISE INFO '%', LPAD(' ', 165, '-');
+
 END;
 $$ LANGUAGE plpgsql;
