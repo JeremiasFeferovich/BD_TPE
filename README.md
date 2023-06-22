@@ -1,3 +1,7 @@
+# Introducción
+
+Este trabajo pretende demostrar el conocimiento sobre SQL Avanzado (PSM, Triggers) visto a lo largo de la cursada de la materia Base de Datos I, mediante la implementación de funcionalidades y restricciones no disponibles de forma estándar.
+
 # Proceso de importación
 
 1.  Abrir una nueva sesión de psql, con el comando:
